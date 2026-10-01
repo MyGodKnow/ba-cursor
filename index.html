@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070b16">
+<meta name="description" content="BA Cursor — 单文件、零依赖的指针火花特效，鼠标与手机触摸通用。">
+<title>BA Cursor · 指针火花特效</title>
+<style>
+  :root {
+    --bg: #070b16;
+    --bg-soft: #0d1424;
+    --line: rgba(120, 170, 255, 0.16);
+    --fg: #e8eefc;
+    --fg-dim: #8fa2c4;
+    --accent: #45afff;
+    --accent-soft: rgba(69, 175, 255, 0.14);
+    --radius: 16px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { min-height: 100%; }
+
+  body {
+    background:
+      radial-gradient(1200px 700px at 12% -10%, rgba(69, 175, 255, 0.16), transparent 60%),
+      radial-gradient(900px 600px at 90% 8%, rgba(164, 120, 255, 0.13), transparent 60%),
+      var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+  }
+
+  .wrap {
+    width: min(1080px, 100% - 2.5rem);
+    margin-inline: auto;
+  }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    min-height: 78vh;
+    min-height: 78svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    padding: clamp(3rem, 9vh, 7rem) 0 clamp(2rem, 5vh, 4rem);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.35rem 0.85rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .badge .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+  }
+
+  h1 {
+    font-size: clamp(2.6rem, 9vw, 5rem);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+  }
+
+  h1 .glow {
+    background: linear-gradient(100deg, #45afff 0%, #9d7bff 55%, #ff7bc8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 24px rgba(69, 175, 255, 0.35));
+  }
+
+  .lead {
+    margin-top: 1.25rem;
+    max-width: 46ch;
+    color: var(--fg-dim);
+    font-size: clamp(0.98rem, 3.4vw, 1.12rem);
+  }
+
+  .hint {
+    margin-top: 2rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.9rem;
+    color: var(--fg);
+    border: 1px dashed var(--line);
+    border-radius: 999px;
+    padding: 0.55rem 1.1rem;
+  }
+
+  .hint b { color: var(--accent); font-weight: 600; }
+
+  /* ---------- 通用区块 ---------- */
+  section { padding: clamp(2.5rem, 6vh, 4.5rem) 0; }
+
+  .sec-title {
+    font-size: clamp(1.25rem, 4.6vw, 1.6rem);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.35rem;
+  }
+
+  .sec-desc { color: var(--fg-dim); font-size: 0.94rem; margin-bottom: 1.6rem; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+
+  .card {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.15rem 1.25rem;
+  }
+
+  .card h3 { font-size: 1rem; font-weight: 650; margin-bottom: 0.3rem; }
+  .card p { font-size: 0.88rem; color: var(--fg-dim); }
+  .card code { color: var(--accent); font-size: 0.85em; }
+
+  /* ---------- 控制台 ---------- */
+  .panel {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem 1.25rem;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid rgba(120, 170, 255, 0.08);
+  }
+
+  .row:last-child { border-bottom: 0; }
+
+  .row-label {
+    min-width: 5.5rem;
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+    flex: none;
+  }
+
+  .swatches { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+  .sw {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.14);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .sw[aria-pressed="true"] {
+    border-color: #fff;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 180px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(120, 170, 255, 0.22);
+    outline: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px rgba(69, 175, 255, 0.6);
+    cursor: pointer;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 16px; height: 16px; border: 0;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+
+  .val { font-size: 0.85rem; color: var(--accent); min-width: 3ch; font-variant-numeric: tabular-nums; }
+
+  .btn {
+    font: inherit;
+    font-size: 0.86rem;
+    color: var(--fg);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.45rem 0.95rem;
+    cursor: pointer;
+    transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+  }
+
+  .btn:hover { background: rgba(69, 175, 255, 0.14); border-color: rgba(69, 175, 255, 0.4); }
+  .btn:active { transform: scale(0.97); }
+  .btn.primary { background: var(--accent-soft); border-color: rgba(69, 175, 255, 0.45); color: var(--accent); }
+
+  .switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.86rem;
+    color: var(--fg-dim);
+    cursor: pointer;
+  }
+
+  .switch input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
+  /* ---------- 容器演示 ---------- */
+  .stage {
+    position: relative;
+    height: clamp(190px, 42vw, 260px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background:
+      repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.022) 0 10px, transparent 10px 20px),
+      rgba(255, 255, 255, 0.015);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--fg-dim);
+    font-size: 0.88rem;
+    user-select: none;
+    touch-action: manipulation;
+    margin-bottom: 0.9rem;
+  }
+
+  .stage .stage-idle { padding: 1rem; }
+
+  .state {
+    font-size: 0.82rem;
+    color: var(--fg-dim);
+    margin-left: 0.5rem;
+  }
+
+  .state.on { color: #5be3a8; }
+  .state.off { color: #ff7b9c; }
+
+  /* ---------- 页脚 ---------- */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 2rem 0 3rem;
+    color: var(--fg-dim);
+    font-size: 0.83rem;
+  }
+
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  footer p + p { margin-top: 0.4rem; }
+
+  @media (max-width: 560px) {
+    .row { gap: 0.6rem; }
+    .row-label { min-width: 100%; }
+    input[type="range"] { width: 100%; }
+    .hero { min-height: 68vh; min-height: 68svh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge"><span class="dot"></span>单文件 · 零依赖 · Canvas 2D</span>
+    <h1>BA <span class="glow">Cursor</span></h1>
+    <p class="lead">
+      一个轻量的指针火花特效：鼠标按下迸出光环与火星，拖动留下渐隐拖尾。
+      已适配触摸屏 —— 手机和平板上<b style="color:var(--accent);font-weight:600">手指点按</b>即可触发。
+    </p>
+    <div class="hint">在页面任意位置 <b>点击 / 点按 / 拖动</b> 试试</div>
+  </header>
+
+  <section>
+    <h2 class="sec-title">特性</h2>
+    <p class="sec-desc">相比原版桌面版，这里补齐了网页集成需要的全部能力。</p>
+    <div class="cards">
+      <div class="card">
+        <h3>指针事件统一</h3>
+        <p>基于 Pointer Events，鼠标、触摸、手写笔共用一套逻辑；触摸拖动滚动时自动丢弃拖尾，不留残影。</p>
+      </div>
+      <div class="card">
+        <h3>可安全卸载</h3>
+        <p><code>destroy()</code> 会移除全部监听、取消动画帧并摘掉 canvas，SPA 路由切换不会残留全屏图层。</p>
+      </div>
+      <div class="card">
+        <h3>容器挂载</h3>
+        <p>传入 <code>target</code> 即可只在某个区域生效，不再强制铺满整个页面。</p>
+      </div>
+      <div class="card">
+        <h3>移动端省电</h3>
+        <p>设备像素比上限默认 2（3x 屏降采样）、空闲即停、页面切后台自动暂停。</p>
+      </div>
+      <div class="card">
+        <h3>无障碍友好</h3>
+        <p>自动识别 <code>prefers-reduced-motion</code>，在系统的「减弱动态效果」下自动降级为轻量迸发。</p>
+      </div>
+      <div class="card">
+        <h3>运行时调参</h3>
+        <p><code>setOptions()</code> 可实时改颜色、缩放、速度等，无需重建实例。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec-title">实时调参</h2>
+    <p class="sec-desc">下面的改动会立刻作用到全屏特效上，改完再点页面看效果。</p>
+    <div class="panel">
+      <div class="row">
+        <span class="row-label">颜色</span>
+        <div class="swatches" id="swatches">
+          <button class="sw" style="background:#45afff" data-color="45,175,255" aria-pressed="true" aria-label="蓝"></button>
+          <button class="sw" style="background:#9d7bff" data-color="157,123,255" aria-pressed="false" aria-label="紫"></button>
+          <button class="sw" style="background:#ff7bc8" data-color="255,123,200" aria-pressed="false" aria-label="粉"></button>
+          <button class="sw" style="background:#00ffd6" data-color="0,255,214" aria-pressed="false" aria-label="青"></button>
+          <button class="sw" style="background:#ffc45a" data-color="255,196,90" aria-pressed="false" aria-label="金"></button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="row-label">缩放</span>
+        <input type="range" id="scale" min="0.8" max="2.5" step="0.1" value="1.5">
+        <span class="val" id="scaleVal">1.5</span>
+      </div>
+      <div class="row">
+        <span class="row-label">不透明度</span>
+        <input type="range" id="opacity" min="0.2" max="1" step="0.05" value="1">
+        <span class="val" id="opacityVal">1.0</span>
+      </div>
+      <div class="row">
+        <span class="row-label">选项</span>
+        <label class="switch"><input type="checkbox" id="trailAlways"> 悬停即出拖尾（trailAlways）</label>
+        <label class="switch"><input type="checkbox" id="touch" checked> 响应触摸（touch）</label>
+        <button class="btn" id="clearBtn">清空特效</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec-title">容器挂载 / 卸载</h2>
+    <p class="sec-desc">演示 <code>target</code> 与 <code>destroy()</code>：效果只在该区域内生效，可随时卸载。</p>
+    <div class="stage" id="stage">
+      <div class="stage-idle" id="stageIdle">点击「挂载」后，在这个方框里点击或拖动</div>
+    </div>
+    <div>
+      <button class="btn primary" id="mountBtn">挂载到此区域</button>
+      <button class="btn" id="unmountBtn">卸载</button>
+      <span class="state off" id="mountState">未挂载</span>
+    </div>
+  </section>
+
+  <footer>
+    <p>BA Cursor v1.0.0 · MIT License · Copyright (c) 2026 MyGodKnow</p>
+    <p>移植自 <b>BASpark</b>（WPF + WebView2 桌面应用，MIT License，Copyright (c) 2026 Doom），并针对网页与移动端重做。</p>
+  </footer>
+
+</div>
+
+<script>
+  // 自动初始化一个全屏实例（也可省略，脚本会自动创建）
+  window.BACursorConfig = { color: '45,175,255', scale: 1.5 };
+</script>
+<script src="ba-cursor.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var fx = window.BACursor.instance; // 自动创建的全局实例
+
+  // ---------- 实时调参 ----------
+  var swatches = document.getElementById('swatches');
+  swatches.addEventListener('click', function (e) {
+    var btn = e.target.closest('.sw');
+    if (!btn || !fx) return;
+    Array.prototype.forEach.call(swatches.children, function (b) {
+      b.setAttribute('aria-pressed', String(b === btn));
+    });
+    fx.setOptions({ color: btn.getAttribute('data-color') });
+  });
+
+  var scale = document.getElementById('scale');
+  var scaleVal = document.getElementById('scaleVal');
+  scale.addEventListener('input', function () {
+    scaleVal.textContent = Number(scale.value).toFixed(1);
+    if (fx) fx.setOptions({ scale: Number(scale.value) });
+  });
+
+  var opacity = document.getElementById('opacity');
+  var opacityVal = document.getElementById('opacityVal');
+  opacity.addEventListener('input', function () {
+    opacityVal.textContent = Number(opacity.value).toFixed(1);
+    if (fx) fx.setOptions({ opacity: Number(opacity.value) });
+  });
+
+  document.getElementById('trailAlways').addEventListener('change', function (e) {
+    if (fx) fx.setOptions({ trailAlways: e.target.checked });
+  });
+
+  document.getElementById('touch').addEventListener('change', function (e) {
+    if (fx) fx.setOptions({ touch: e.target.checked });
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (fx) fx.clear();
+  });
+
+  // ---------- 容器挂载 / 卸载 ----------
+  var stage = document.getElementById('stage');
+  var stageIdle = document.getElementById('stageIdle');
+  var mountState = document.getElementById('mountState');
+  var mounted = null;
+
+  function setState(text, cls) {
+    mountState.textContent = text;
+    mountState.className = 'state ' + cls;
+  }
+
+  document.getElementById('mountBtn').addEventListener('click', function () {
+    if (mounted) return;
+    mounted = window.BACursor.create({ target: stage, zIndex: 2 });
+    stageIdle.style.opacity = '0.45';
+    setState('已挂载', 'on');
+  });
+
+  document.getElementById('unmountBtn').addEventListener('click', function () {
+    if (!mounted) return;
+    mounted.destroy(); // 移除监听 + 摘掉 canvas
+    mounted = null;
+    stageIdle.style.opacity = '';
+    setState('已卸载', 'off');
+  });
+})();
+</script>
+</body>
+</html>
