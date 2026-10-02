@@ -357,6 +357,11 @@
         <span class="val" id="trailOpacityVal">1.0</span>
       </div>
       <div class="row">
+        <span class="row-label">拖尾火花</span>
+        <input type="range" id="trailSpark" min="0" max="0.4" step="0.02" value="0.1">
+        <span class="val" id="trailSparkVal">0.10</span>
+      </div>
+      <div class="row">
         <span class="row-label">选项</span>
         <label class="switch"><input type="checkbox" id="trailAlways"> 悬停即出拖尾（trailAlways）</label>
         <label class="switch"><input type="checkbox" id="touch" checked> 响应触摸（touch）</label>
@@ -380,7 +385,7 @@
   </section>
 
   <footer>
-    <p>BA Cursor v1.2.1 · MIT License · Copyright (c) 2026 MyGodKnow</p>
+    <p>BA Cursor v1.2.2 · MIT License · Copyright (c) 2026 MyGodKnow</p>
     <p>移植自 <b>BASpark</b>（WPF + WebView2 桌面应用，MIT License，Copyright (c) 2026 Doom），并针对网页与移动端重做。</p>
   </footer>
 
@@ -432,6 +437,13 @@
   trailOpacity.addEventListener('input', function () {
     trailOpacityVal.textContent = Number(trailOpacity.value).toFixed(1);
     apply({ trailOpacity: Number(trailOpacity.value) });
+  });
+
+  var trailSpark = document.getElementById('trailSpark');
+  var trailSparkVal = document.getElementById('trailSparkVal');
+  trailSpark.addEventListener('input', function () {
+    trailSparkVal.textContent = Number(trailSpark.value).toFixed(2);
+    apply({ trailSpawnChance: Number(trailSpark.value) });
   });
 
   document.getElementById('trailAlways').addEventListener('change', function (e) {

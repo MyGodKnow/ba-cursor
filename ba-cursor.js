@@ -34,7 +34,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.2.1';
+  var VERSION = '1.2.2';
 
   // ---------------------------------------------------------------------------
   // 默认配置。所有键都可以在 window.BACursorConfig 或构造参数里覆盖。
@@ -50,12 +50,12 @@
     clickSpeed: 1.0, // 点击特效播放速度
     maxTrail: 16, // 拖尾最大采样点数（与 BASpark 原版一致）
     trailAlways: false, // true = 不按下也有拖尾（悬停即出）
-    trailSpawnChance: 0.3, // 拖尾过程中额外迸出小火星的概率
+    trailSpawnChance: 0.1, // 拖尾过程中额外迸出小火星的概率（原版 0.3，火星太密）
     trailOpacity: 1, // 拖尾浓度（alpha 乘数），1 = 原版浓度，越小越淡
     trailColor: null, // 拖尾单独配色，null = 跟随 color
     trailSpacing: 0, // 拖尾采样间距（px）；0 = 原版行为，一次移动只记一个点
     maxInterpolation: 8, // 开启 trailSpacing 后，单次移动最多补插几个点
-    sparkCount: 4, // 每次点击迸出的火星数量
+    sparkCount: 3, // 每次点击迸出的火星数量（原版 4）
 
     // --- 挂载 ---
     target: null, // 挂载目标：CSS 选择器或 DOM 元素；为空则全屏 fixed
@@ -1105,12 +1105,18 @@
     ctx.clip();
   };
 
-  BACursor.prototype.rectsArea = function (rects) {
-    var area = 0;
+  /** 多个脏矩形的并集包围盒。用它作为唯一的裁剪区域，比逐块裁剪便宜得多 */
+  BACursor.prototype.unionOfRects = function (rects) {
+    if (!rects || rects.length === 0) return null;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (var i = 0; i < rects.length; i++) {
-      area += rects[i].w * rects[i].h;
+      var r = rects[i];
+      if (r.x < x0) x0 = r.x;
+      if (r.y < y0) y0 = r.y;
+      if (r.x + r.w > x1) x1 = r.x + r.w;
+      if (r.y + r.h > y1) y1 = r.y + r.h;
     }
-    return area;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   };
 
   // ---------------------------------------------------------------------------
@@ -1147,17 +1153,21 @@
     var ctx = this.ctx;
     var renderRects = this.getRenderRects();
 
-    // 脏区又多又碎时，逐块 clip + clear 的开销会超过一次全屏重绘，直接全屏更快。
-    // 阈值别定太松：画布一大，全屏 clearRect 本身就不便宜
-    var full = renderRects.length > 6 ||
-      this.rectsArea(renderRects) > this.cssWidth * this.cssHeight * 0.5;
+    // 只取一个并集包围盒作为裁剪区域。
+    // 之前是「脏区块数 > 6 就整屏重绘」，结果拖动时不断冒出的火星会很快把块数顶上去，
+    // 于是每帧都退化成全屏重绘 —— 拖得越久火星越多，就越卡。现在无论多少块脏区，
+    // 裁剪永远只有一次；只有并集真的覆盖了大半个画布才走整屏。
+    var union = this.unionOfRects(renderRects);
+    var full = !union || union.w * union.h > this.cssWidth * this.cssHeight * 0.75;
 
     if (full) {
       ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
     } else {
       ctx.save();
-      this.clipToRects(ctx, renderRects);
-      this.clearBufferRects(renderRects);
+      ctx.beginPath();
+      ctx.rect(union.x, union.y, union.w, union.h);
+      ctx.clip();
+      ctx.clearRect(union.x, union.y, union.w, union.h);
     }
 
     ctx.globalCompositeOperation = 'lighter';

@@ -1,6 +1,6 @@
 {
   "name": "ba-cursor",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "轻量级指针火花特效：单文件、零依赖、Canvas 2D，鼠标与移动端触摸通用。",
   "main": "ba-cursor.js",
   "unpkg": "ba-cursor.js",
