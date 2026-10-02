@@ -314,7 +314,7 @@
       </div>
       <div class="card">
         <h3>移动端省电</h3>
-        <p>设备像素比上限默认 2（3x 屏降采样）、空闲即停、页面切后台自动暂停；拖尾逐段绘制不做模糊，低端机也不掉帧。</p>
+        <p>设备像素比上限默认 2（3x 屏降采样）、空闲即停、页面切后台自动暂停；单画布直绘，省掉每帧的缓冲拷贝。</p>
       </div>
       <div class="card">
         <h3>无障碍友好</h3>
@@ -353,13 +353,14 @@
       </div>
       <div class="row">
         <span class="row-label">拖尾浓度</span>
-        <input type="range" id="trailOpacity" min="0.1" max="1" step="0.05" value="0.5">
-        <span class="val" id="trailOpacityVal">0.5</span>
+        <input type="range" id="trailOpacity" min="0.1" max="1" step="0.05" value="1">
+        <span class="val" id="trailOpacityVal">1.0</span>
       </div>
       <div class="row">
         <span class="row-label">选项</span>
         <label class="switch"><input type="checkbox" id="trailAlways"> 悬停即出拖尾（trailAlways）</label>
         <label class="switch"><input type="checkbox" id="touch" checked> 响应触摸（touch）</label>
+        <label class="switch"><input type="checkbox" id="trailGlow" checked> 拖尾外发光（trailGlow）</label>
         <button class="btn" id="clearBtn">清空特效</button>
       </div>
     </div>
@@ -379,7 +380,7 @@
   </section>
 
   <footer>
-    <p>BA Cursor v1.1.0 · MIT License · Copyright (c) 2026 MyGodKnow</p>
+    <p>BA Cursor v1.2.0 · MIT License · Copyright (c) 2026 MyGodKnow</p>
     <p>移植自 <b>BASpark</b>（WPF + WebView2 桌面应用，MIT License，Copyright (c) 2026 Doom），并针对网页与移动端重做。</p>
   </footer>
 
@@ -394,50 +395,61 @@
 (function () {
   'use strict';
 
-  var fx = window.BACursor.instance; // 自动创建的全局实例
+  // 引擎实例由 ba-cursor.js 在 DOMContentLoaded 之后才创建，
+  // 这里必须每次实时取，提前缓存会拿到 null 导致整个面板失效
+  function apply(patch) {
+    var inst = window.BACursor.instance;
+    if (inst) inst.setOptions(patch);
+  }
 
   // ---------- 实时调参 ----------
   var swatches = document.getElementById('swatches');
   swatches.addEventListener('click', function (e) {
     var btn = e.target.closest('.sw');
-    if (!btn || !fx) return;
+    if (!btn) return;
     Array.prototype.forEach.call(swatches.children, function (b) {
       b.setAttribute('aria-pressed', String(b === btn));
     });
-    fx.setOptions({ color: btn.getAttribute('data-color') });
+    apply({ color: btn.getAttribute('data-color') });
   });
 
   var scale = document.getElementById('scale');
   var scaleVal = document.getElementById('scaleVal');
   scale.addEventListener('input', function () {
     scaleVal.textContent = Number(scale.value).toFixed(1);
-    if (fx) fx.setOptions({ scale: Number(scale.value) });
+    apply({ scale: Number(scale.value) });
   });
 
   var opacity = document.getElementById('opacity');
   var opacityVal = document.getElementById('opacityVal');
   opacity.addEventListener('input', function () {
     opacityVal.textContent = Number(opacity.value).toFixed(1);
-    if (fx) fx.setOptions({ opacity: Number(opacity.value) });
+    apply({ opacity: Number(opacity.value) });
   });
 
   var trailOpacity = document.getElementById('trailOpacity');
   var trailOpacityVal = document.getElementById('trailOpacityVal');
   trailOpacity.addEventListener('input', function () {
     trailOpacityVal.textContent = Number(trailOpacity.value).toFixed(1);
-    if (fx) fx.setOptions({ trailOpacity: Number(trailOpacity.value) });
+    apply({ trailOpacity: Number(trailOpacity.value) });
   });
 
   document.getElementById('trailAlways').addEventListener('change', function (e) {
-    if (fx) fx.setOptions({ trailAlways: e.target.checked });
+    apply({ trailAlways: e.target.checked });
   });
 
   document.getElementById('touch').addEventListener('change', function (e) {
-    if (fx) fx.setOptions({ touch: e.target.checked });
+    apply({ touch: e.target.checked });
+  });
+
+  // 外发光是拖尾里最贵的一项：每段都要做一次高斯模糊。手机上可对比开关前后的手感。
+  document.getElementById('trailGlow').addEventListener('change', function (e) {
+    apply({ advanced: { trailGlow: e.target.checked ? 3 : 0 } });
   });
 
   document.getElementById('clearBtn').addEventListener('click', function () {
-    if (fx) fx.clear();
+    var inst = window.BACursor.instance;
+    if (inst) inst.clear();
   });
 
   // ---------- 容器挂载 / 卸载 ----------

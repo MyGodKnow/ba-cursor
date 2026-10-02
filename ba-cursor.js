@@ -34,7 +34,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
 
   // ---------------------------------------------------------------------------
   // 默认配置。所有键都可以在 window.BACursorConfig 或构造参数里覆盖。
@@ -48,13 +48,13 @@
     // --- 动态 ---
     trailSpeed: 1.0, // 拖尾衰减速度，越大消失越快
     clickSpeed: 1.0, // 点击特效播放速度
-    maxTrail: 20, // 拖尾最大采样点数
+    maxTrail: 16, // 拖尾最大采样点数（与 BASpark 原版一致）
     trailAlways: false, // true = 不按下也有拖尾（悬停即出）
     trailSpawnChance: 0.3, // 拖尾过程中额外迸出小火星的概率
-    trailOpacity: 0.5, // 拖尾浓度（alpha 乘数），越小越淡
+    trailOpacity: 1, // 拖尾浓度（alpha 乘数），1 = 原版浓度，越小越淡
     trailColor: null, // 拖尾单独配色，null = 跟随 color
-    trailSpacing: 6, // 拖尾采样间距（px），越小越细腻
-    maxInterpolation: 8, // 单次移动最多补几个采样点
+    trailSpacing: 0, // 拖尾采样间距（px）；0 = 原版行为，一次移动只记一个点
+    maxInterpolation: 8, // 开启 trailSpacing 后，单次移动最多补插几个点
     sparkCount: 4, // 每次点击迸出的火星数量
 
     // --- 挂载 ---
@@ -82,7 +82,7 @@
       ringMinWidth: 0.4, // 光环最细线宽
       ringMaxWidth: 3.3, // 光环最粗线宽
       trailWidth: 5.0, // 拖尾线宽
-      trailGlow: 0, // 拖尾发光半径；>0 会逐段做高斯模糊，移动端会明显掉帧
+      trailGlow: 3, // 拖尾外发光半径（与 BASpark 原版一致）
       trailSparkSize: 9, // 拖尾小火星尺寸基数
       trailSparkSpeed: 1.3, // 拖尾小火星速度基数
       sparkSizeBase: 4, // 点击火星尺寸基数
@@ -289,9 +289,8 @@
 
     (this._fullscreen ? document.body : this.container).appendChild(canvas);
 
+    // 单画布直绘：不用离屏缓冲，省掉每帧从缓冲拷贝回主画布的 drawImage 开销
     this.ctx = canvas.getContext('2d');
-    this.bufferCanvas = document.createElement('canvas');
-    this.bufferCtx = this.bufferCanvas.getContext('2d');
   };
 
   BACursor.prototype._on = function (host, type, fn, opts) {
@@ -397,8 +396,6 @@
     }
     this.canvas = null;
     this.ctx = null;
-    this.bufferCanvas = null;
-    this.bufferCtx = null;
 
     if (this.container && this._restorePosition !== null) {
       this.container.style.position = this._restorePosition;
@@ -443,7 +440,7 @@
   // 尺寸 / 坐标
   // ---------------------------------------------------------------------------
   BACursor.prototype._resize = function () {
-    if (this.destroyed || !this.canvas) return;
+    if (this.destroyed || !this.ctx) return;
     var o = this.options;
     var dpr = Math.min(window.devicePixelRatio || 1, o.maxDpr);
 
@@ -466,12 +463,11 @@
     this.cssHeight = cssH;
     this.canvas.width = w;
     this.canvas.height = h;
-    this.bufferCanvas.width = w;
-    this.bufferCanvas.height = h;
     this.previousDirtyRects = [];
     this.forceFullRedraw = true;
 
-    this.bufferCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // 画布尺寸变更会重置上下文状态，transform 必须重新设置
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     if (this.waves.length || this.sparks.length || this.trail.length) {
       this.scheduleNextAnimationFrame();
@@ -580,7 +576,10 @@
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < o.moveThreshold) return; // 位移还不够，等下一次累积
 
-    var steps = Math.min(o.maxInterpolation, Math.max(1, Math.ceil(dist / o.trailSpacing)));
+    // trailSpacing 为 0 时不做补插，保持与 BASpark 原版一致的采样密度
+    var steps = o.trailSpacing > 0
+      ? Math.min(o.maxInterpolation, Math.max(1, Math.ceil(dist / o.trailSpacing)))
+      : 1;
     for (var i = 1; i <= steps; i++) {
       var t = i / steps;
       this.trail.push({ x: a.x + dx * t, y: a.y + dy * t, life: 1 });
@@ -605,7 +604,7 @@
       rot: Math.random() * Math.PI * 2,
       rs: 0.16,
       s: adv.trailSparkSize * this.scale,
-      a: 0.5, // 比点击火星淡，避免拖尾过程中喧宾夺主
+      a: 0.7, // 与 BASpark 原版一致
       f: 0.95,
       fromClick: false
     });
@@ -657,10 +656,7 @@
     this.forceFullRedraw = true;
     this.lastFrameTime = now();
     if (this.ctx && this.canvas) {
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-    if (this.bufferCtx && this.bufferCanvas) {
-      this.bufferCtx.clearRect(0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
+      this.ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
     }
     return this;
   };
@@ -767,7 +763,7 @@
   // 绘制
   // ---------------------------------------------------------------------------
   BACursor.prototype.clearBuffer = function (rect) {
-    var ctx = this.bufferCtx;
+    var ctx = this.ctx;
     if (rect) {
       ctx.clearRect(rect.x, rect.y, rect.w, rect.h);
     } else {
@@ -783,7 +779,7 @@
   };
 
   BACursor.prototype.updateTrail = function (frameScale) {
-    var ctx = this.bufferCtx;
+    var ctx = this.ctx;
     var o = this.options;
     var adv = this.adv;
     var n = this.trail.length;
@@ -815,13 +811,9 @@
     var color = o.trailColor || this.color;
     var alphaMul = o.trailOpacity;
 
-    // 拖尾自身用 source-over 绘制：相邻线段在 lighter 下重叠会让拖尾发白过亮
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    // 以下绘制参数与 BASpark 原版一致：
+    // 线宽 5、逐段线性渐变、外发光 shadowBlur
     ctx.lineWidth = adv.trailWidth;
-
     if (adv.trailGlow > 0) {
       ctx.shadowColor = 'rgba(' + color + ', 0.6)';
       ctx.shadowBlur = adv.trailGlow;
@@ -838,28 +830,32 @@
       ctx.arc(pts[0].x, pts[0].y, 2.5 + 2 * fade, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(' + color + ', ' + (fade * 0.85 * alphaMul) + ')';
       ctx.fill();
-      ctx.restore();
+      ctx.shadowColor = 'transparent';
       return;
     }
 
     var lastIdx = pts.length - 1;
     for (var j = 0; j < lastIdx; j++) {
+      var alphaStart = (j / lastIdx) * alphaMul;
+      var alphaEnd = ((j + 1) / lastIdx) * alphaMul;
       var a0 = pts[j];
       var a1 = pts[j + 1];
-      // 逐段纯色（取段中点透明度）：比每段各建一个线性渐变更省，肉眼几乎无差别
-      var alphaSeg = ((j + 0.5) / lastIdx) * alphaMul;
+
+      var segGrad = ctx.createLinearGradient(a0.x, a0.y, a1.x, a1.y);
+      segGrad.addColorStop(0, 'rgba(' + color + ', ' + alphaStart + ')');
+      segGrad.addColorStop(1, 'rgba(' + color + ', ' + alphaEnd + ')');
 
       ctx.beginPath();
       ctx.moveTo(a0.x, a0.y);
       ctx.lineTo(a1.x, a1.y);
-      ctx.strokeStyle = 'rgba(' + color + ', ' + alphaSeg.toFixed(3) + ')';
+      ctx.strokeStyle = segGrad;
       ctx.stroke();
     }
-    ctx.restore();
+    ctx.shadowColor = 'transparent';
   };
 
   BACursor.prototype.strokeRingSegment = function (wx, wy, radius, a0, a1, lineWidth, strokeStyle) {
-    var ctx = this.bufferCtx;
+    var ctx = this.ctx;
     ctx.beginPath();
     ctx.arc(wx, wy, radius, a0, a1);
     ctx.lineWidth = lineWidth;
@@ -869,7 +865,7 @@
 
   BACursor.prototype.updateWaves = function (clickFrameScale) {
     var adv = this.adv;
-    var ctx = this.bufferCtx;
+    var ctx = this.ctx;
     var self = this;
 
     function updateFilledCircle(w, waveProg) {
@@ -956,7 +952,7 @@
   };
 
   BACursor.prototype.updateSparks = function (clickFrameScale, trailFrameScale) {
-    var ctx = this.bufferCtx;
+    var ctx = this.ctx;
     for (var i = this.sparks.length - 1; i >= 0; i--) {
       var s = this.sparks[i];
       var fs = s.fromClick ? clickFrameScale : trailFrameScale;
@@ -1006,14 +1002,6 @@
     return { x: x - padding, y: y - padding, w: padding * 2, h: padding * 2 };
   };
 
-  BACursor.prototype.segmentRect = function (a, b, padding) {
-    var x0 = Math.min(a.x, b.x) - padding;
-    var y0 = Math.min(a.y, b.y) - padding;
-    var x1 = Math.max(a.x, b.x) + padding;
-    var y1 = Math.max(a.y, b.y) + padding;
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  };
-
   BACursor.prototype.intersects = function (a, b) {
     return (
       a.x <= b.x + b.w &&
@@ -1060,10 +1048,23 @@
 
     if (trailPoints.length === 1) {
       rects.push(this.pointRect(trailPoints[0].x, trailPoints[0].y, trailPad));
-    } else {
-      for (var i = 0; i < trailPoints.length - 1; i++) {
-        rects.push(this.segmentRect(trailPoints[i], trailPoints[i + 1], trailPad));
+    } else if (trailPoints.length > 1) {
+      // 拖尾本身是连续的一条，直接给整条算包围盒：
+      // 逐段生成矩形再两两合并既慢又多余
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var i = 0; i < trailPoints.length; i++) {
+        var tp = trailPoints[i];
+        if (tp.x < minX) minX = tp.x;
+        if (tp.y < minY) minY = tp.y;
+        if (tp.x > maxX) maxX = tp.x;
+        if (tp.y > maxY) maxY = tp.y;
       }
+      rects.push({
+        x: minX - trailPad,
+        y: minY - trailPad,
+        w: maxX - minX + trailPad * 2,
+        h: maxY - minY + trailPad * 2
+      });
     }
 
     var wavePad = 34 * this.scale + adv.ringMaxWidth + 16;
@@ -1101,29 +1102,12 @@
     ctx.clip();
   };
 
-  BACursor.prototype.renderToMain = function (rects) {
-    var mainCtx = this.ctx;
-    var mainCanvas = this.canvas;
-    var bufferCanvas = this.bufferCanvas;
-
-    if (!rects || rects.length === 0) {
-      mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
-      mainCtx.drawImage(bufferCanvas, 0, 0);
-      return;
-    }
-
-    var dpr = this.dpr || 1;
+  BACursor.prototype.rectsArea = function (rects) {
+    var area = 0;
     for (var i = 0; i < rects.length; i++) {
-      var rect = rects[i];
-      var sx = Math.max(0, Math.floor(rect.x * dpr));
-      var sy = Math.max(0, Math.floor(rect.y * dpr));
-      var sw = Math.min(mainCanvas.width - sx, Math.ceil(rect.w * dpr));
-      var sh = Math.min(mainCanvas.height - sy, Math.ceil(rect.h * dpr));
-      if (sw <= 0 || sh <= 0) continue;
-
-      mainCtx.clearRect(sx, sy, sw, sh);
-      mainCtx.drawImage(bufferCanvas, sx, sy, sw, sh, sx, sy, sw, sh);
+      area += rects[i].w * rects[i].h;
     }
+    return area;
   };
 
   // ---------------------------------------------------------------------------
@@ -1145,7 +1129,6 @@
       this.lastFrameTime = frameTime;
       if (this.previousDirtyRects.length > 0) {
         this.clearBufferRects(this.previousDirtyRects);
-        this.renderToMain(this.previousDirtyRects);
         this.previousDirtyRects = [];
       }
       this.animationFramePending = false;
@@ -1158,22 +1141,29 @@
     var trailFrameScale = baseScale * this.trailSpeed;
     var clickFrameScale = baseScale * this.clickSpeed;
 
-    var bctx = this.bufferCtx;
+    var ctx = this.ctx;
     var renderRects = this.getRenderRects();
 
-    bctx.save();
-    this.clipToRects(bctx, renderRects);
-    bctx.globalCompositeOperation = 'lighter';
+    // 脏区又多又碎时，逐块 clip + clear 的开销会超过一次全屏重绘，直接全屏更快
+    var full = renderRects.length > 4 ||
+      this.rectsArea(renderRects) > this.cssWidth * this.cssHeight * 0.35;
 
-    this.clearBufferRects(renderRects);
+    if (full) {
+      ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+    } else {
+      ctx.save();
+      this.clipToRects(ctx, renderRects);
+      this.clearBufferRects(renderRects);
+    }
+
+    ctx.globalCompositeOperation = 'lighter';
     this.updateTrail(trailFrameScale);
     this.updateWaves(clickFrameScale);
     this.updateSparks(clickFrameScale, trailFrameScale);
+    ctx.globalCompositeOperation = 'source-over';
 
-    bctx.globalCompositeOperation = 'source-over';
-    bctx.restore();
+    if (!full) ctx.restore();
 
-    this.renderToMain(renderRects);
     this.previousDirtyRects = this.getEffectRects();
     this.forceFullRedraw = false;
 
