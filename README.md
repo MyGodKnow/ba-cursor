@@ -12,10 +12,11 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| Pointer Events | 鼠标、触摸、手写笔共用一套逻辑；触摸滚动时自动丢弃拖尾，不留残影 |
+| 滚动也能拖尾 | 触摸走独立的 touch 通道；页面正在滚动时拖尾依旧跟随手指 |
 | `destroy()` | 移除全部监听、取消动画帧、摘除 canvas，SPA 路由切换不残留 |
 | 容器挂载 | 传入 `target` 只在指定区域生效，不再强制全屏 |
 | 移动端省电 | 设备像素比上限默认 2、空闲即停渲染、页面切后台自动暂停 |
+| 采样插值 | 快速滑动时按固定间距补插采样点，拖尾是连续曲线而不是折线 |
 | 无障碍 | 识别 `prefers-reduced-motion`，自动降级为轻量迸发 |
 | 运行时调参 | `setOptions()` 实时改颜色 / 缩放 / 速度，无需重建实例 |
 | 脏矩形渲染 | 只重绘变化区域，静止时零 CPU 占用 |
@@ -71,20 +72,27 @@ window.BACursorConfig = {
   opacity: 1.0,          // 整体不透明度
   trailSpeed: 1.0,       // 拖尾衰减速度，越大消失越快
   clickSpeed: 1.0,       // 点击特效播放速度
-  maxTrail: 16,          // 拖尾最大采样点数
+  maxTrail: 20,          // 拖尾最大采样点数
   trailAlways: false,    // true = 不按下也有拖尾（悬停即出）
   trailSpawnChance: 0.3, // 拖尾中额外迸出小火星的概率
   sparkCount: 4,         // 每次点击迸出的火星数量
+  trailOpacity: 0.5,     // 拖尾浓度，1 = 与主色同浓，越小越淡
+  trailColor: null,      // 拖尾单独配色，null = 跟随 color
+  trailSpacing: 6,       // 拖尾采样点间距（px），越小越细腻
+  maxInterpolation: 8,   // 单次移动最多补插几个采样点
   target: null,          // CSS 选择器或 DOM 元素；为空则全屏
   zIndex: 2147483647,    // canvas 层级
   maxDpr: 2,             // 设备像素比上限
   touch: true,           // 是否响应触摸 / 手写笔
+  trailOnScroll: true,   // 触摸滚动页面时是否同时显示拖尾
   moveThreshold: 2,      // 拖动多少像素才记录一个拖尾点
   pauseOnHidden: true,   // 页面切后台时暂停渲染
   reduceMotion: 'auto',  // 'auto' | true | false
   autoInit: true,        // 是否自动初始化
 };
 ```
+
+调淡拖尾：把 `trailOpacity` 往下调（`0.35` 以下基本只剩一层薄光）；想让拖尾换个颜色，单独给 `trailColor` 即可。
 
 ### 高级参数
 
@@ -102,7 +110,7 @@ new BACursor({
     ringMinWidth: 0.4,
     ringMaxWidth: 3.3,
     trailWidth: 5.0,     // 拖尾线宽
-    trailGlow: 3,        // 拖尾发光半径，设 0 可关掉提速
+    trailGlow: 0,        // 拖尾发光半径；>0 会逐段做高斯模糊，移动端会明显掉帧
     trailSparkSize: 9,
     trailSparkSpeed: 1.3,
     sparkSizeBase: 4,
@@ -132,8 +140,11 @@ new BACursor({
 
 ## 移动端说明
 
-- **点按出火花，拖动即滚动**：手指点按会触发一次完整迸发；拖动时浏览器接管滚动并派发 `pointercancel`，此时特效会立即丢弃拖尾，不会留下残影。
-- 想让拖动也能留拖尾，请在该区域设置 `touch-action: none`（代价是页面无法在此区域滚动）。
+**滚动和拖尾可以同时存在**。这是本库和多数同类实现最大的不同：页面滚动时浏览器会发出 `pointercancel` 掐断 Pointer Events，但原生 `touchmove` 在滚动期间仍持续派发，所以触摸被单独接到 touch 通道上 —— 手指滑动时页面照常滚动，拖尾一路跟随。
+
+- 拖尾画在固定于视口的画布上，因此手指滚动页面时它不会跟着页面内容走，只反映手指在屏幕上的真实轨迹。
+- 不喜欢滚动时出现拖尾，把 `trailOnScroll` 设成 `false` 即可（此时只在按住不动或点按时出特效）。
+- 多指手势（双指缩放等）会自动跳过，不影响页面缩放。
 - 默认把设备像素比限制在 `2`，3x 屏幕下可省一半以上填充率；追求画质可设 `maxDpr: 3`。
 - 系统开启「减弱动态效果」时（`prefers-reduced-motion: reduce`），自动降级：不产生跟随拖尾，火星数量减半。
 
@@ -141,7 +152,7 @@ new BACursor({
 
 ## 浏览器兼容
 
-依赖 `Pointer Events`、`requestAnimationFrame`、`matchMedia`。即 Chrome / Edge 55+、Firefox 59+、Safari 13+，含 iOS Safari 与 Android WebView。
+依赖 `Pointer Events`、`Touch Events`、`requestAnimationFrame`、`matchMedia`。即 Chrome / Edge 55+、Firefox 59+、Safari 13+，含 iOS Safari 与 Android WebView。
 
 `ResizeObserver` 为可选增强，不支持时回退到 `window.resize` 监听。
 

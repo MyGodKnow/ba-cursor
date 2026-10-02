@@ -291,7 +291,7 @@
     <h1>BA <span class="glow">Cursor</span></h1>
     <p class="lead">
       一个轻量的指针火花特效：鼠标按下迸出光环与火星，拖动留下渐隐拖尾。
-      已适配触摸屏 —— 手机和平板上<b style="color:var(--accent);font-weight:600">手指点按</b>即可触发。
+      手机端同样可用 —— <b style="color:var(--accent);font-weight:600">手指滑动时页面照常滚动，拖尾一路跟随</b>。
     </p>
     <div class="hint">在页面任意位置 <b>点击 / 点按 / 拖动</b> 试试</div>
   </header>
@@ -301,8 +301,8 @@
     <p class="sec-desc">相比原版桌面版，这里补齐了网页集成需要的全部能力。</p>
     <div class="cards">
       <div class="card">
-        <h3>指针事件统一</h3>
-        <p>基于 Pointer Events，鼠标、触摸、手写笔共用一套逻辑；触摸拖动滚动时自动丢弃拖尾，不留残影。</p>
+        <h3>滚动也能拖尾</h3>
+        <p>触摸走独立的 touch 通道：页面正在滚动时拖尾依旧跟着手指，不必在「滚动页面」和「看特效」之间二选一。</p>
       </div>
       <div class="card">
         <h3>可安全卸载</h3>
@@ -314,7 +314,7 @@
       </div>
       <div class="card">
         <h3>移动端省电</h3>
-        <p>设备像素比上限默认 2（3x 屏降采样）、空闲即停、页面切后台自动暂停。</p>
+        <p>设备像素比上限默认 2（3x 屏降采样）、空闲即停、页面切后台自动暂停；拖尾逐段绘制不做模糊，低端机也不掉帧。</p>
       </div>
       <div class="card">
         <h3>无障碍友好</h3>
@@ -352,6 +352,11 @@
         <span class="val" id="opacityVal">1.0</span>
       </div>
       <div class="row">
+        <span class="row-label">拖尾浓度</span>
+        <input type="range" id="trailOpacity" min="0.1" max="1" step="0.05" value="0.5">
+        <span class="val" id="trailOpacityVal">0.5</span>
+      </div>
+      <div class="row">
         <span class="row-label">选项</span>
         <label class="switch"><input type="checkbox" id="trailAlways"> 悬停即出拖尾（trailAlways）</label>
         <label class="switch"><input type="checkbox" id="touch" checked> 响应触摸（touch）</label>
@@ -374,7 +379,7 @@
   </section>
 
   <footer>
-    <p>BA Cursor v1.0.0 · MIT License · Copyright (c) 2026 MyGodKnow</p>
+    <p>BA Cursor v1.1.0 · MIT License · Copyright (c) 2026 MyGodKnow</p>
     <p>移植自 <b>BASpark</b>（WPF + WebView2 桌面应用，MIT License，Copyright (c) 2026 Doom），并针对网页与移动端重做。</p>
   </footer>
 
@@ -414,6 +419,13 @@
   opacity.addEventListener('input', function () {
     opacityVal.textContent = Number(opacity.value).toFixed(1);
     if (fx) fx.setOptions({ opacity: Number(opacity.value) });
+  });
+
+  var trailOpacity = document.getElementById('trailOpacity');
+  var trailOpacityVal = document.getElementById('trailOpacityVal');
+  trailOpacity.addEventListener('input', function () {
+    trailOpacityVal.textContent = Number(trailOpacity.value).toFixed(1);
+    if (fx) fx.setOptions({ trailOpacity: Number(trailOpacity.value) });
   });
 
   document.getElementById('trailAlways').addEventListener('change', function (e) {

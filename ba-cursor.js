@@ -4,7 +4,10 @@
  *
  * 移植自 BASpark（WPF + WebView2 桌面应用，MIT License, Copyright (c) 2026 Doom），
  * 并针对「个人网站 + 移动端」做了以下改造：
- *   - Pointer Events：统一处理鼠标 / 触摸 / 手写笔，手机端可正常触发
+ *   - 鼠标 / 手写笔走 Pointer Events，触摸走 Touch Events。
+ *     触摸单独走 touch 通道的原因：页面滚动时浏览器会发出 pointercancel
+ *     掐断 pointermove，而 touchmove 在滚动期间仍持续派发 —— 所以手机上
+ *     「一边滚动页面、一边显示拖尾」是可以并存的。
  *   - destroy()：SPA 路由切换可安全卸载，不留全屏 canvas 与事件监听
  *   - target 选项：可挂载到任意容器，而非只能铺满全屏
  *   - prefers-reduced-motion 自动降级；页面隐藏时暂停渲染
@@ -31,7 +34,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
 
   // ---------------------------------------------------------------------------
   // 默认配置。所有键都可以在 window.BACursorConfig 或构造参数里覆盖。
@@ -45,9 +48,13 @@
     // --- 动态 ---
     trailSpeed: 1.0, // 拖尾衰减速度，越大消失越快
     clickSpeed: 1.0, // 点击特效播放速度
-    maxTrail: 16, // 拖尾最大采样点数
+    maxTrail: 20, // 拖尾最大采样点数
     trailAlways: false, // true = 不按下也有拖尾（悬停即出）
     trailSpawnChance: 0.3, // 拖尾过程中额外迸出小火星的概率
+    trailOpacity: 0.5, // 拖尾浓度（alpha 乘数），越小越淡
+    trailColor: null, // 拖尾单独配色，null = 跟随 color
+    trailSpacing: 6, // 拖尾采样间距（px），越小越细腻
+    maxInterpolation: 8, // 单次移动最多补几个采样点
     sparkCount: 4, // 每次点击迸出的火星数量
 
     // --- 挂载 ---
@@ -57,6 +64,7 @@
 
     // --- 交互 ---
     touch: true, // 是否响应触摸 / 手写笔；false = 仅鼠标
+    trailOnScroll: true, // 触摸滚动页面时是否同时显示拖尾
     moveThreshold: 2, // 拖动多少像素才记录一个拖尾点
     pauseOnHidden: true, // 页面切到后台时暂停渲染
     reduceMotion: 'auto', // 'auto' 尊重 prefers-reduced-motion；true 强制降级；false 关闭
@@ -74,7 +82,7 @@
       ringMinWidth: 0.4, // 光环最细线宽
       ringMaxWidth: 3.3, // 光环最粗线宽
       trailWidth: 5.0, // 拖尾线宽
-      trailGlow: 3, // 拖尾发光半径（0 = 关闭，移动端可关掉提速）
+      trailGlow: 0, // 拖尾发光半径；>0 会逐段做高斯模糊，移动端会明显掉帧
       trailSparkSize: 9, // 拖尾小火星尺寸基数
       trailSparkSpeed: 1.3, // 拖尾小火星速度基数
       sparkSizeBase: 4, // 点击火星尺寸基数
@@ -157,6 +165,10 @@
     // 交互状态
     this.isDown = false;
     this.lastPos = null;
+    this._anchor = null; // 拖尾采样锚点（保证慢速拖动也能出拖尾）
+    this._touchId = null; // 正在跟踪的触摸点 identifier
+    this._scrolling = false; // 页面是否正在滚动
+    this._scrollTimer = 0;
 
     // 时序
     this.baseFrameMs = 1000 / 60;
@@ -282,9 +294,10 @@
     this.bufferCtx = this.bufferCanvas.getContext('2d');
   };
 
-  BACursor.prototype._on = function (host, type, fn) {
-    host.addEventListener(type, fn, { passive: true });
-    this._listeners.push({ host: host, type: type, fn: fn });
+  BACursor.prototype._on = function (host, type, fn, opts) {
+    var options = opts || { passive: true };
+    host.addEventListener(type, fn, options);
+    this._listeners.push({ host: host, type: type, fn: fn, opts: options });
   };
 
   BACursor.prototype._bindEvents = function () {
@@ -293,18 +306,53 @@
     var host = this._fullscreen ? window : this.container;
     this.eventHost = host;
 
-    // Pointer Events：鼠标 / 触摸 / 手写笔统一入口
-    this._on(host, 'pointerdown', function (e) { self._handleDown(e); });
-    this._on(host, 'pointermove', function (e) { self._handleMove(e); });
-    this._on(host, 'pointerup', function () { self.isDown = false; });
-    this._on(host, 'pointercancel', function () { self._handleCancel(); });
-    this._on(host, 'pointerleave', function () { self.isDown = false; });
+    // Pointer Events：只处理鼠标 / 手写笔，触摸交给下面的 touch 事件
+    this._on(host, 'pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      self._handleDown(e.clientX, e.clientY, e.button, e.pointerType);
+    });
+    this._on(host, 'pointermove', function (e) {
+      if (e.pointerType === 'touch') return;
+      self._handleMove(e.clientX, e.clientY);
+    });
+    this._on(host, 'pointerup', function (e) {
+      if (e.pointerType === 'touch') return;
+      self._releasePointer();
+    });
+    this._on(host, 'pointerleave', function (e) {
+      if (e.pointerType === 'touch') return;
+      self._releasePointer();
+    });
+    this._on(host, 'pointercancel', function (e) {
+      if (e.pointerType === 'touch') return;
+      self._releasePointer();
+    });
     // 窗口失焦时鼠标抬起收不到 pointerup，兜底复位
-    this._on(window, 'blur', function () { self.isDown = false; });
+    this._on(window, 'blur', function () { self._releasePointer(); });
+
+    // Touch Events：触摸专用通道。
+    // 关键：页面滚动时浏览器会发出 pointercancel 掐断 pointermove，
+    // 但 touchmove 在滚动期间仍会持续派发 —— 所以「滚动 + 拖尾」可以并存。
+    if (o.touch) {
+      this._on(host, 'touchstart', function (e) { self._handleTouchStart(e); });
+      this._on(host, 'touchmove', function (e) { self._handleTouchMove(e); });
+      this._on(host, 'touchend', function (e) { self._handleTouchEnd(e); });
+      this._on(host, 'touchcancel', function (e) { self._handleTouchEnd(e); });
+    }
 
     var onResize = function () { self._resize(); };
     this._on(window, 'resize', onResize);
     this._on(window, 'orientationchange', onResize);
+
+    // 滚动状态：供 trailOnScroll 判断是否在滚动
+    this._on(window, 'scroll', function () {
+      self._scrolling = true;
+      if (self._scrollTimer) clearTimeout(self._scrollTimer);
+      self._scrollTimer = setTimeout(function () {
+        self._scrolling = false;
+        self._scrollTimer = 0;
+      }, 150);
+    });
 
     if (!this._fullscreen && typeof ResizeObserver !== 'undefined') {
       this._resizeObserver = new ResizeObserver(onResize);
@@ -329,7 +377,7 @@
     var i;
     for (i = 0; i < this._listeners.length; i++) {
       var l = this._listeners[i];
-      l.host.removeEventListener(l.type, l.fn);
+      l.host.removeEventListener(l.type, l.fn, l.opts);
     }
     this._listeners = [];
 
@@ -371,6 +419,11 @@
       this._rafId = 0;
     }
     this.animationFramePending = false;
+
+    if (this._scrollTimer) {
+      clearTimeout(this._scrollTimer);
+      this._scrollTimer = 0;
+    }
 
     this._teardownDom();
 
@@ -425,78 +478,137 @@
     }
   };
 
-  BACursor.prototype._posFromEvent = function (e) {
-    if (this._fullscreen) return { x: e.clientX, y: e.clientY };
+  BACursor.prototype._posFromXY = function (clientX, clientY) {
+    if (this._fullscreen) return { x: clientX, y: clientY };
     var r = this.container.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: clientX - r.left, y: clientY - r.top };
   };
 
   // ---------------------------------------------------------------------------
-  // 事件处理
+  // 事件处理（鼠标 / 手写笔）
   // ---------------------------------------------------------------------------
-  BACursor.prototype._handleDown = function (e) {
+  BACursor.prototype._handleDown = function (clientX, clientY, button, pointerType) {
     if (this.destroyed || this.renderingPaused) return;
     var o = this.options;
-    if (!o.touch && e.pointerType !== 'mouse') return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return; // 仅左键
+    if (!o.touch && pointerType !== 'mouse') return;
+    if (pointerType === 'mouse' && button !== 0) return; // 仅左键
 
-    var p = this._posFromEvent(e);
+    var p = this._posFromXY(clientX, clientY);
     this.isDown = true;
     this.lastPos = p;
+    this._anchor = null;
     this.trigger(p.x, p.y);
   };
 
-  BACursor.prototype._handleMove = function (e) {
+  BACursor.prototype._handleMove = function (clientX, clientY) {
     if (this.destroyed || this.renderingPaused) return;
     var o = this.options;
-    if (!o.touch && e.pointerType !== 'mouse') return;
     if (!this.isDown && !o.trailAlways) return;
+    this._trackMove(this._posFromXY(clientX, clientY));
+  };
 
-    var p = this._posFromEvent(e);
-    var prev = this.lastPos;
+  BACursor.prototype._releasePointer = function () {
+    this.isDown = false;
+    this._anchor = null;
+  };
 
-    if (!prev) {
-      this.lastPos = p;
+  // ---------------------------------------------------------------------------
+  // 事件处理（触摸）
+  // ---------------------------------------------------------------------------
+  BACursor.prototype._handleTouchStart = function (e) {
+    if (this.destroyed || this.renderingPaused) return;
+    if (e.touches.length !== 1) return; // 多指手势（缩放等）不参与
+
+    var t = e.touches[0];
+    var p = this._posFromXY(t.clientX, t.clientY);
+    this._touchId = t.identifier;
+    this.isDown = true;
+    this.lastPos = p;
+    this._anchor = null;
+    this.trigger(p.x, p.y);
+  };
+
+  BACursor.prototype._handleTouchMove = function (e) {
+    if (this.destroyed || this.renderingPaused || !this.isDown) return;
+    if (!this.options.trailOnScroll && this._scrolling) return;
+
+    var t = this._findTouch(e.touches);
+    if (!t) return;
+    this._trackMove(this._posFromXY(t.clientX, t.clientY));
+  };
+
+  BACursor.prototype._handleTouchEnd = function (e) {
+    if (e.touches && e.touches.length > 0) return; // 仍有手指在屏上
+    this.isDown = false;
+    this._touchId = null;
+    this._anchor = null;
+  };
+
+  BACursor.prototype._findTouch = function (list) {
+    if (!list) return null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].identifier === this._touchId) return list[i];
+    }
+    return null;
+  };
+
+  // ---------------------------------------------------------------------------
+  // 拖尾采样
+  // ---------------------------------------------------------------------------
+  /**
+   * 把一次指针移动转成拖尾采样点。
+   * 用独立的锚点累计位移，慢速拖动同样能出拖尾；
+   * 两点之间按 trailSpacing 补插，快速滑动时拖尾才是连续的曲线而非折线。
+   */
+  BACursor.prototype._trackMove = function (p) {
+    var o = this.options;
+    this.lastPos = p; // 拖尾头部始终跟随指针
+
+    if (this.reduced) {
+      this._anchor = p;
       return;
     }
 
-    var dx = p.x - prev.x;
-    var dy = p.y - prev.y;
-    if (Math.sqrt(dx * dx + dy * dy) > o.moveThreshold) {
-      // 降级模式：不做跟随拖尾，只保留点击迸发
-      if (!this.reduced) {
-        this.trail.push({ x: p.x, y: p.y, life: 1 });
-        if (this.trail.length > this.maxTrail) this.trail.shift();
-
-        if (Math.random() < o.trailSpawnChance) {
-          var a = Math.random() * Math.PI * 2;
-          var adv = this.adv;
-          var speedAdjust = this.scale / 1.5;
-          this.sparks.push({
-            x: p.x + Math.cos(a) * 10 * this.scale,
-            y: p.y + Math.sin(a) * 10 * this.scale,
-            vx: Math.cos(a) * adv.trailSparkSpeed * speedAdjust,
-            vy: Math.sin(a) * adv.trailSparkSpeed * speedAdjust,
-            rot: Math.random() * Math.PI * 2,
-            rs: 0.16,
-            s: adv.trailSparkSize * this.scale,
-            a: 0.7,
-            f: 0.95,
-            fromClick: false
-          });
-        }
-      }
-      this.scheduleNextAnimationFrame();
+    var a = this._anchor;
+    if (!a) {
+      this._anchor = p;
+      return;
     }
 
-    this.lastPos = p;
+    var dx = p.x - a.x;
+    var dy = p.y - a.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < o.moveThreshold) return; // 位移还不够，等下一次累积
+
+    var steps = Math.min(o.maxInterpolation, Math.max(1, Math.ceil(dist / o.trailSpacing)));
+    for (var i = 1; i <= steps; i++) {
+      var t = i / steps;
+      this.trail.push({ x: a.x + dx * t, y: a.y + dy * t, life: 1 });
+    }
+    while (this.trail.length > this.maxTrail) this.trail.shift();
+    this._anchor = p;
+
+    if (Math.random() < o.trailSpawnChance) this._spawnTrailSpark(p.x, p.y);
+    this.scheduleNextAnimationFrame();
   };
 
-  BACursor.prototype._handleCancel = function () {
-    // 触摸拖拽转为页面滚动时触发：丢弃拖尾，避免滚动残留
-    this.isDown = false;
-    this.trail.length = 0;
-    this.lastPos = null;
+  BACursor.prototype._spawnTrailSpark = function (x, y) {
+    var adv = this.adv;
+    var a = Math.random() * Math.PI * 2;
+    var speedAdjust = this.scale / 1.5;
+
+    this.sparks.push({
+      x: x + Math.cos(a) * 10 * this.scale,
+      y: y + Math.sin(a) * 10 * this.scale,
+      vx: Math.cos(a) * adv.trailSparkSpeed * speedAdjust,
+      vy: Math.sin(a) * adv.trailSparkSpeed * speedAdjust,
+      rot: Math.random() * Math.PI * 2,
+      rs: 0.16,
+      s: adv.trailSparkSize * this.scale,
+      a: 0.5, // 比点击火星淡，避免拖尾过程中喧宾夺主
+      f: 0.95,
+      fromClick: false
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -539,6 +651,8 @@
     this.trail = [];
     this.isDown = false;
     this.lastPos = null;
+    this._anchor = null;
+    this._touchId = null;
     this.previousDirtyRects = [];
     this.forceFullRedraw = true;
     this.lastFrameTime = now();
@@ -670,6 +784,7 @@
 
   BACursor.prototype.updateTrail = function (frameScale) {
     var ctx = this.bufferCtx;
+    var o = this.options;
     var adv = this.adv;
     var n = this.trail.length;
     var baseDecay = (this.isDown ? 0.085 : 0.18) * frameScale;
@@ -697,19 +812,18 @@
     var gapY = pts[pts.length - 1].y - pts[pts.length - 2].y;
     var gap = Math.sqrt(gapX * gapX + gapY * gapY);
 
-    if (gap < 0.75 && this.trail.length === 1) {
-      var fade = Math.max(0, this.trail[0].life);
-      ctx.shadowColor = 'transparent';
-      ctx.beginPath();
-      ctx.arc(pts[0].x, pts[0].y, 2.5 + 2 * fade, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(' + this.color + ', ' + (fade * 0.85) + ')';
-      ctx.fill();
-      return;
-    }
+    var color = o.trailColor || this.color;
+    var alphaMul = o.trailOpacity;
 
+    // 拖尾自身用 source-over 绘制：相邻线段在 lighter 下重叠会让拖尾发白过亮
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.lineWidth = adv.trailWidth;
+
     if (adv.trailGlow > 0) {
-      ctx.shadowColor = 'rgba(' + this.color + ', 0.6)';
+      ctx.shadowColor = 'rgba(' + color + ', 0.6)';
       ctx.shadowBlur = adv.trailGlow;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
@@ -718,24 +832,30 @@
       ctx.shadowBlur = 0;
     }
 
+    if (gap < 0.75 && this.trail.length === 1) {
+      var fade = Math.max(0, this.trail[0].life);
+      ctx.beginPath();
+      ctx.arc(pts[0].x, pts[0].y, 2.5 + 2 * fade, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + color + ', ' + (fade * 0.85 * alphaMul) + ')';
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
     var lastIdx = pts.length - 1;
     for (var j = 0; j < lastIdx; j++) {
-      var alphaStart = j / lastIdx;
-      var alphaEnd = (j + 1) / lastIdx;
       var a0 = pts[j];
       var a1 = pts[j + 1];
-
-      var segGrad = ctx.createLinearGradient(a0.x, a0.y, a1.x, a1.y);
-      segGrad.addColorStop(0, 'rgba(' + this.color + ', ' + alphaStart + ')');
-      segGrad.addColorStop(1, 'rgba(' + this.color + ', ' + alphaEnd + ')');
+      // 逐段纯色（取段中点透明度）：比每段各建一个线性渐变更省，肉眼几乎无差别
+      var alphaSeg = ((j + 0.5) / lastIdx) * alphaMul;
 
       ctx.beginPath();
       ctx.moveTo(a0.x, a0.y);
       ctx.lineTo(a1.x, a1.y);
-      ctx.strokeStyle = segGrad;
+      ctx.strokeStyle = 'rgba(' + color + ', ' + alphaSeg.toFixed(3) + ')';
       ctx.stroke();
     }
-    ctx.shadowColor = 'transparent';
+    ctx.restore();
   };
 
   BACursor.prototype.strokeRingSegment = function (wx, wy, radius, a0, a1, lineWidth, strokeStyle) {
