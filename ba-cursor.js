@@ -50,7 +50,7 @@
     clickSpeed: 1.0, // 点击特效播放速度
     maxTrail: 16, // 拖尾最大采样点数（与 BASpark 原版一致）
     trailAlways: false, // true = 不按下也有拖尾（悬停即出）
-    trailSpawnChance: 0.1, // 拖尾过程中额外迸出小火星的概率（原版 0.3，火星太密）
+    trailSpawnChance: 0.2, // 拖尾过程中额外迸出小火星的概率（原版 0.3，火星太密）
     trailOpacity: 1, // 拖尾浓度（alpha 乘数），1 = 原版浓度，越小越淡
     trailColor: null, // 拖尾单独配色，null = 跟随 color
     trailSpacing: 0, // 拖尾采样间距（px）；0 = 原版行为，一次移动只记一个点
