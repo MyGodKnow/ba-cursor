@@ -34,7 +34,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
 
   // ---------------------------------------------------------------------------
   // 默认配置。所有键都可以在 window.BACursorConfig 或构造参数里覆盖。
@@ -811,9 +811,33 @@
     var color = o.trailColor || this.color;
     var alphaMul = o.trailOpacity;
 
-    // 以下绘制参数与 BASpark 原版一致：
-    // 线宽 5、逐段线性渐变、外发光 shadowBlur
     ctx.lineWidth = adv.trailWidth;
+
+    if (gap < 0.75 && this.trail.length === 1) {
+      var fade = Math.max(0, this.trail[0].life);
+      ctx.beginPath();
+      ctx.arc(pts[0].x, pts[0].y, 2.5 + 2 * fade, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + color + ', ' + (fade * 0.85 * alphaMul) + ')';
+      ctx.fill();
+      return;
+    }
+
+    var lastIdx = pts.length - 1;
+    var tail = pts[0];
+    var tip = pts[lastIdx];
+
+    // 整条拖尾一次成型：连贯路径 + 尾到头的一整条渐变 + 只做一次高斯模糊。
+    //
+    // BASpark 原版是逐段描边、逐段各做一次 shadowBlur。视觉上两者是一样的
+    // （相邻段的端点透明度本来就首尾相接，拼起来就是一条连续渐变），但逐段模糊
+    // 每帧要创建十几次离屏图层再逐个模糊，画布一大就掉帧。
+    // 模糊本身是低频信号，合并成一次在肉眼上分辨不出差别。
+    ctx.beginPath();
+    ctx.moveTo(tail.x, tail.y);
+    for (var j = 1; j <= lastIdx; j++) {
+      ctx.lineTo(pts[j].x, pts[j].y);
+    }
+
     if (adv.trailGlow > 0) {
       ctx.shadowColor = 'rgba(' + color + ', 0.6)';
       ctx.shadowBlur = adv.trailGlow;
@@ -824,33 +848,12 @@
       ctx.shadowBlur = 0;
     }
 
-    if (gap < 0.75 && this.trail.length === 1) {
-      var fade = Math.max(0, this.trail[0].life);
-      ctx.beginPath();
-      ctx.arc(pts[0].x, pts[0].y, 2.5 + 2 * fade, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(' + color + ', ' + (fade * 0.85 * alphaMul) + ')';
-      ctx.fill();
-      ctx.shadowColor = 'transparent';
-      return;
-    }
+    var trailGrad = ctx.createLinearGradient(tail.x, tail.y, tip.x, tip.y);
+    trailGrad.addColorStop(0, 'rgba(' + color + ', 0)');
+    trailGrad.addColorStop(1, 'rgba(' + color + ', ' + alphaMul + ')');
+    ctx.strokeStyle = trailGrad;
+    ctx.stroke();
 
-    var lastIdx = pts.length - 1;
-    for (var j = 0; j < lastIdx; j++) {
-      var alphaStart = (j / lastIdx) * alphaMul;
-      var alphaEnd = ((j + 1) / lastIdx) * alphaMul;
-      var a0 = pts[j];
-      var a1 = pts[j + 1];
-
-      var segGrad = ctx.createLinearGradient(a0.x, a0.y, a1.x, a1.y);
-      segGrad.addColorStop(0, 'rgba(' + color + ', ' + alphaStart + ')');
-      segGrad.addColorStop(1, 'rgba(' + color + ', ' + alphaEnd + ')');
-
-      ctx.beginPath();
-      ctx.moveTo(a0.x, a0.y);
-      ctx.lineTo(a1.x, a1.y);
-      ctx.strokeStyle = segGrad;
-      ctx.stroke();
-    }
     ctx.shadowColor = 'transparent';
   };
 
@@ -1144,9 +1147,10 @@
     var ctx = this.ctx;
     var renderRects = this.getRenderRects();
 
-    // 脏区又多又碎时，逐块 clip + clear 的开销会超过一次全屏重绘，直接全屏更快
-    var full = renderRects.length > 4 ||
-      this.rectsArea(renderRects) > this.cssWidth * this.cssHeight * 0.35;
+    // 脏区又多又碎时，逐块 clip + clear 的开销会超过一次全屏重绘，直接全屏更快。
+    // 阈值别定太松：画布一大，全屏 clearRect 本身就不便宜
+    var full = renderRects.length > 6 ||
+      this.rectsArea(renderRects) > this.cssWidth * this.cssHeight * 0.5;
 
     if (full) {
       ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
